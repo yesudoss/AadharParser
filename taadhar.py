@@ -1,156 +1,75 @@
-#!/usr/bin/env python
-import os
-import os.path
-import json
-import sys
+import cv2
+import numpy as np
 import pytesseract
 import re
-import csv
-import dateutil.parser as dparser
-from PIL import Image
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# path = 'D:\Yesu\Python\Aadhar parser\Aadhaar-Card-OCR-master\src\img.jpg'
-path = 'D:\Yesu\Python\Aadhar parser\Aadhaar-Card-OCR-master\img_aug.jpg'
-# path = 'D:\Yesu\Python\Aadhar parser\Aadhaar-Card-OCR-master\img2.jpg'
-
-# ##############################################
-
-# #############################################################
-img = Image.open(path)
-img = img.convert('RGBA')
-pix = img.load()
-
-# for y in range(img.size[1]):
-#     for x in range(img.size[0]):
-#         if pix[x, y][0] < 102 or pix[x, y][1] < 102 or pix[x, y][2] < 102:
-#             pix[x, y] = (0, 0, 0, 255)
-#         else:
-#             pix[x, y] = (255, 255, 255, 255)
-
-img.save('temp.png')
-
-text = pytesseract.image_to_string(Image.open('temp.png'))
-print("************************")
-print(text)
-print("************************")
-# Initializing data variable
-name = None
-gender = None
-ayear = None
-uid = None
-yearline = []
-genline = []
-nameline = []
-text1 = []
-text2 = []
-genderStr = '(Female|Male|Mie|emale|male|ale|FEMALE|MALE|EMALE)$'
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Give the tessaract path
 
 
-# Searching for Year of Birth
+img3 = cv2.imread('aadhar_card.jpg') #  Image path
+
+# removing shadow/noise from image which can be taken from phone camera
+
+rgb_planes = cv2.split(img3)
+
+result_planes = []
+result_norm_planes = []
+for plane in rgb_planes:
+    dilated_img = cv2.dilate(plane, np.ones((5, 5), np.uint8))        #change the value of (10,10) to see different results
+    bg_img = cv2.medianBlur(dilated_img, 21)
+    diff_img = 255 - cv2.absdiff(plane, bg_img)
+    norm_img = cv2.normalize(diff_img, None, alpha=0, beta=250, norm_type=cv2.NORM_MINMAX,
+                                                 dtype=cv2.CV_8UC1)
+    result_planes.append(diff_img)
+    result_norm_planes.append(norm_img)
+
+result = cv2.merge(result_planes)
+result_norm = cv2.merge(result_norm_planes)
+
+# cv2.imshow('Dilation', result)
+# cv2.waitKey(0)
+
+dst = cv2.fastNlMeansDenoisingColored(result_norm, None, 10, 10, 7, 11)             # removing noise from image
+
+text = pytesseract.image_to_string(dst).upper().replace(" ", "")
+date = str(re.findall(r"[\d]{1,4}[/-][\d]{1,4}[/-][\d]{1,4}", text)).replace("]", "").replace("[","").replace("'", "")
+number = str(re.findall(r"[0-9]{11,12}", text)).replace("]", "").replace("[","").replace("'", "")
+sex = str(re.findall(r"MALE|FEMALE", text)).replace("[","").replace("'", "").replace("]", "")
+
+name_list = []
+is_dob_set = False
 lines = text
-for wordlist in lines.split('\n'):
-    xx = wordlist.split()
-    if [w for w in xx if re.search('(Year|Birth|irth|YoB|YOB:|DOB:|DOB)$', w)]:
-        yearline = wordlist
-        break
+for word in lines.split('\n'):
+    if str(re.findall(r"[\d]{1,4}[/-][\d]{1,4}[/-][\d]{1,4}", word)).replace("]", "").replace("[","").replace("'", ""):
+        is_dob_set = True
+        continue
+    elif str(re.findall(r"[0-9]{11,12}", word)).replace("]", "").replace("[","").replace("'", ""):
+        continue
+    elif str(re.findall(r"MALE|FEMALE", word)).replace("[","").replace("'", "").replace("]", ""):
+        continue
     else:
-        text1.append(wordlist)
-try:
-    text2 = text.split(yearline, 1)[1]
-except Exception:
-    pass
-
-try:
-    yearline = re.split('Year|Birth|irth|YoB|YOB:|DOB:|DOB', yearline)[1:]
-    yearline = ''.join(str(e) for e in yearline)
-    ayear = yearline.replace('/', '-')
-    ayear = ayear.strip()
-    # if yearline:
-    #     ayear = dparser.parse(yearline, fuzzy=True).year
-except Exception:
-    pass
-
-# Searching for Gender
-try:
-    for wordlist in lines.split('\n'):
-        
-        xx = wordlist.split()
-        print("word list: ", xx)
-        if [w for w in xx if re.search(genderStr, w)]:
-            print("*************************************************************")
-            genline = wordlist
-            break
-    print("genline: ", genline)
-
-    if 'Female' in genline or 'FEMALE' in genline:
-        gender = "Female"
-    if 'Male' in genline or 'MALE' in genline or 'Mie' in genline:
-        gender = "Male"
-
-    text2 = text.split(genline, 1)[1]
-except Exception:
-    pass
-
-# Read Database
-with open('namedb1.csv', 'r') as f:
-    reader = csv.reader(f)
-    newlist = list(reader)
-newlist = sum(newlist, [])
-
-# Searching for Name and finding exact name in database
-try:
-    text1 = filter(None, text1)
-    for x in text1:
-        for y in x.split():
-            if y.upper() in newlist:
-                nameline.append(x)
-                break
-    name = ' '.join(str(e) for e in nameline)
-except Exception:
-    pass
-
-# Searching for UID
-uid = set()
-try:
-    newlist = []
-    for xx in text.split('\n'):
-        newlist.append(xx.replace(" ", ""))
-    newlist = list(filter(lambda x: len(x) == 12, newlist))
-    for no in newlist:
-        if re.match("^[0-9 ]+$", no):
-            uid.add(no)
-
-except Exception:
-    pass
-
-# Making tuples of data
-data = {}
-data['Name'] = name
-data['Gender'] = gender
-data['Birth year'] = ayear
-if len(list(uid)) > 0:
-    data['Uid'] = list(uid)[0]
+        if is_dob_set == False:
+            name_list.append(word)
+name_list = list(filter(None, name_list))
+pop_items = []
+title_index = 0
+is_title_index = False
+aadhar_name = ''
+for name in name_list:
+    temp = ''.join(e for e in name if e.isalnum())
+    if not temp.isalnum() or len(temp) <= 2:
+        pop_items.append(name)
+    
+for pop_item in pop_items:
+    if pop_item in name_list:
+        name_list.pop(name_list.index(pop_item))
+for name in name_list:    
+    if 'GOVERNMENT' in name or 'INDIA' in name:
+        title_index = name_list.index(name)
+        is_title_index = True
+if is_title_index:
+    aadhar_name = name_list[title_index+2]
 else:
-    data['Uid'] = None
+    aadhar_name = ''.join(e for e in name_list[-1] if e.isalnum())
 
-# Writing data into JSON
-fName = 'a.json'
-with open(fName, 'w') as fp:
-    json.dump(data, fp)
-
-# Removing dummy files
-os.remove('temp.png')
-
-# Reading data back JSON
-with open(fName, 'r') as f:
-    ndata = json.load(f)
-
-print("+++++++++++++++++++++++++++++++")
-print(ndata['Name'])
-print("-------------------------------")
-print(ndata['Gender'])
-print("-------------------------------")
-print(ndata['Birth year'])
-print("-------------------------------")
-print(ndata['Uid'])
-print("-------------------------------")
+data = {"name": aadhar_name, "dob": date, "gender": sex.lower(), "uid": number}
+print(data)
