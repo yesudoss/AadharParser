@@ -13,4 +13,10 @@ pip install numpy
 pip install pytesseract
 pip install opencv-python
 ```
+> Command to run this file
 
+```
+python filename.py
+```
+
+Through this python script we can parse aadhar image to text (front-page). We can get name, aadhar number, gender, date of birth. 65% accuracy assured.
